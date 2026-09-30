@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>사주 풀이 프로토타입</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f4f5f7;--fg:#141b2d;--sub:#5b6478;--card:#fff;--line:#d5d9e2;
+--wood:#2f8f5b;--fire:#d6452f;--earth:#c99a1e;--metal:#7b8494;--water:#2c62b8;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1626;--fg:#e9ecf4;--sub:#98a2b8;--card:#172038;--line:#2a3554;--metal:#a9b2c4;--water:#5b93e6;--wood:#4fbf83;--fire:#ef6a55;--earth:#e2b93d}}
+:root[data-theme="dark"]{--bg:#0f1626;--fg:#e9ecf4;--sub:#98a2b8;--card:#172038;--line:#2a3554;--metal:#a9b2c4;--water:#5b93e6;--wood:#4fbf83;--fire:#ef6a55;--earth:#e2b93d}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:"Noto Serif KR",serif;line-height:1.75}
+main{max-width:640px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:1.9rem;font-weight:900;margin:0 0 4px}
+p.lead{color:var(--sub);margin:0 0 22px}
+.form{display:grid;grid-template-columns:1fr 1fr;gap:12px;background:var(--card);border:1px solid var(--line);padding:16px;border-radius:10px}
+label{display:flex;flex-direction:column;font-size:.85rem;color:var(--sub);gap:4px}
+input,select,button{font:inherit;padding:9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+button{grid-column:1/-1;background:var(--fg);color:var(--bg);font-weight:700;cursor:pointer;border:0;padding:12px}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--water);outline-offset:2px}
+#out{margin-top:28px}
+.pillars{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;direction:ltr}
+.p{border:2px solid var(--line);border-radius:8px;background:var(--card);text-align:center;padding:10px 0}
+.p small{color:var(--sub);display:block;font-size:.8rem}
+.ch{font-size:2.4rem;font-weight:900;line-height:1.25}
+.ko{font-size:.8rem;color:var(--sub)}
+.me{border-color:var(--fg)}
+.bar{display:flex;align-items:center;gap:10px;margin:6px 0}
+.bar b{width:2.2em}
+.bar i{display:block;height:14px;border-radius:3px;min-width:3px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-top:16px}
+.box h2{font-size:1.05rem;margin:0 0 4px}
+.note{font-size:.8rem;color:var(--sub);margin-top:18px}
+</style>
+</head>
+<body>
+<main>
+<h1>사주 풀이 프로토타입</h1>
+<p class="lead">생년월일시를 넣으면 사주 여덟 글자를 계산하고, 규칙에 따라 풀이합니다.</p>
+
+<div class="form">
+  <label>생년월일(양력)<input id="date" type="date" value="1995-05-15"></label>
+  <label>태어난 시각<input id="time" type="time" value="14:30"></label>
+  <label>성별<select id="sex"><option>여성</option><option>남성</option></select></label>
+  <label>시각을 모를 때<select id="unk"><option value="0">시각 입력함</option><option value="1">시주 제외</option></select></label>
+  <button id="go">사주 보기</button>
+</div>
+
+<div id="out"></div>
+<p class="note">오락·참고용입니다. 절기를 매년 같은 날짜로 근사했고 진태양시·서머타임은 반영하지 않아, 경계일 부근은 실제 만세력과 다를 수 있습니다.</p>
+</main>
+
+<script>
+// ---------- 1단계: 기본 데이터 ----------
+const STEM_KO="갑을병정무기경신임계", STEM_HJ="甲乙丙丁戊己庚辛壬癸";
+const BR_KO="자축인묘진사오미신유술해", BR_HJ="子丑寅卯辰巳午未申酉戌亥";
+const STEM_EL=[0,0,1,1,2,2,3,3,4,4];            // 0목 1화 2토 3금 4수
+const BR_EL=[4,2,0,0,2,1,1,2,3,3,2,4];
+const EL_NAME=["목","화","토","금","수"];
+const EL_VAR=["--wood","--fire","--earth","--metal","--water"];
+const mod=(a,n)=>((a%n)+n)%n;
+
+// ---------- 2단계: 사주 계산 ----------
+function calc(y,m,d,h){
+  // 연주: 입춘(약 2/4) 이전이면 전년도
+  const ay=(m<2||(m===2&&d<4))?y-1:y;
+  const year=[mod(ay-4,10),mod(ay-4,12)];
+  // 월주: 절기 근사표(월별 절입일)
+  const TERM_DAY=[6,4,6,5,6,6,7,8,8,8,7,7], TERM_BR=[1,2,3,4,5,6,7,8,9,10,11,0];
+  const mb=d>=TERM_DAY[m-1]?TERM_BR[m-1]:mod(TERM_BR[m-1]-1,12);
+  const month=[(mod(year[0],5)*2+2+mod(mb-2,12))%10,mb];
+  // 일주: 1900-01-01이 갑술(60갑자 10번)임을 기준으로 일수 계산
+  const days=Math.floor((Date.UTC(y,m-1,d)-Date.UTC(1900,0,1))/864e5);
+  const di=mod(days+10,60);
+  const day=[di%10,di%12];
+  // 시주
+  let hour=null;
+  if(h!==null){const hb=Math.floor(((h+1)%24)/2);hour=[(mod(day[0],5)*2+hb)%10,hb];}
+  return {hour,day,month,year};
+}
+
+// ---------- 3단계: 풀이 규칙 ----------
+const DAYMASTER=[
+ "큰 나무처럼 곧고 정직하며 추진력이 있습니다. 굽히기 싫어하는 고집이 있습니다.",
+ "풀과 덩굴처럼 유연하고 적응력이 좋습니다. 겉은 부드럽지만 끈기가 강합니다.",
+ "태양처럼 밝고 열정적이며 표현력이 큽니다. 성격이 급하다는 말을 들을 수 있습니다.",
+ "촛불처럼 섬세하고 따뜻합니다. 집중력이 좋고 감수성이 풍부합니다.",
+ "큰 산처럼 듬직하고 신뢰를 줍니다. 변화에 느리게 반응하는 편입니다.",
+ "논밭의 흙처럼 포용력이 있고 실속을 챙깁니다. 걱정을 안으로 쌓아두기 쉽습니다.",
+ "쇠와 바위처럼 결단력과 의리가 강합니다. 직설적인 화법이 오해를 부를 수 있습니다.",
+ "보석처럼 예민하고 완성도를 추구합니다. 자존심이 높은 편입니다.",
+ "큰 강물처럼 스케일이 크고 자유롭습니다. 생각이 많아 한곳에 머무르기 어렵습니다.",
+ "이슬과 빗물처럼 지혜롭고 사려 깊습니다. 속마음을 잘 드러내지 않습니다."];
+const LACK={0:"성장·계획 (산책, 새로운 배움이 도움이 됩니다)",1:"열정·표현 (사람을 만나고 몸을 움직이면 좋습니다)",
+ 2:"안정·신용 (규칙적인 생활 리듬이 도움이 됩니다)",3:"결단·정리 (우선순위를 정해 마무리하는 습관이 좋습니다)",
+ 4:"휴식·지혜 (충분한 수면과 명상이 도움이 됩니다)"};
+const STRONG={0:"추진력과 자존심이 강합니다",1:"에너지가 넘치고 감정 기복이 있을 수 있습니다",
+ 2:"고집이 세고 신중한 편입니다",3:"원칙적이고 냉정하게 보일 수 있습니다",4:"생각이 깊고 감정이 풍부합니다"};
+
+function interpret(p){
+  const chars=[];
+  for(const k of ["year","month","day","hour"]) if(p[k]){chars.push(STEM_EL[p[k][0]]);chars.push(BR_EL[p[k][1]]);}
+  const cnt=[0,0,0,0,0]; chars.forEach(e=>cnt[e]++);
+  const max=Math.max(...cnt), lacking=cnt.map((c,i)=>c===0?i:-1).filter(i=>i>=0);
+  const top=cnt.indexOf(max);
+  let t=`<div class="box"><h2>타고난 성향 (일간: ${STEM_KO[p.day[0]]}${EL_NAME[STEM_EL[p.day[0]]]})</h2>${DAYMASTER[p.day[0]]}</div>`;
+  t+=`<div class="box"><h2>가장 강한 기운: ${EL_NAME[top]}</h2>${STRONG[top]}.</div>`;
+  t+=lacking.length
+   ?`<div class="box"><h2>부족한 기운: ${lacking.map(i=>EL_NAME[i]).join(", ")}</h2><ul style="margin:4px 0;padding-left:18px">${lacking.map(i=>`<li>${EL_NAME[i]}: ${LACK[i]}</li>`).join("")}</ul></div>`
+   :`<div class="box"><h2>오행이 고루 있는 편입니다</h2>한쪽으로 치우치지 않아 균형이 좋습니다.</div>`;
+  return {cnt,html:t};
+}
+
+// ---------- 4단계: 화면 그리기 ----------
+function render(p){
+  const labels=[["hour","시주"],["day","일주"],["month","월주"],["year","연주"]];
+  let h='<div class="pillars">';
+  for(const [k,name] of labels){
+    const v=p[k];
+    if(!v){h+=`<div class="p"><small>${name}</small><div class="ch">-</div><div class="ko">모름</div></div>`;continue;}
+    const se=STEM_EL[v[0]], be=BR_EL[v[1]];
+    h+=`<div class="p ${k==="day"?"me":""}"><small>${name}</small>
+    <div class="ch" style="color:var(${EL_VAR[se]})">${STEM_HJ[v[0]]}</div><div class="ko">${STEM_KO[v[0]]}</div>
+    <div class="ch" style="color:var(${EL_VAR[be]})">${BR_HJ[v[1]]}</div><div class="ko">${BR_KO[v[1]]}</div></div>`;
+  }
+  h+='</div>';
+  const r=interpret(p), total=r.cnt.reduce((a,b)=>a+b,0);
+  h+='<div class="box"><h2>오행 분포</h2>'+r.cnt.map((c,i)=>
+    `<div class="bar"><b>${EL_NAME[i]}</b><i style="width:${c/total*100*2.2}%;background:var(${EL_VAR[i]})"></i><span>${c}</span></div>`).join("")+'</div>';
+  document.getElementById("out").innerHTML=h+r.html;
+}
+
+document.getElementById("go").onclick=()=>{
+  const [y,m,d]=document.getElementById("date").value.split("-").map(Number);
+  if(!y){alert("생년월일을 입력하세요");return;}
+  const t=document.getElementById("time").value;
+  const unk=document.getElementById("unk").value==="1"||!t;
+  render(calc(y,m,d,unk?null:Number(t.split(":")[0])));
+};
+document.getElementById("go").click();
+</script>
+</body>
+</html>
