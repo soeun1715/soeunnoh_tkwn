@@ -34,6 +34,15 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 .box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-top:16px}
 .box h2{font-size:1.05rem;margin:0 0 4px}
 .note{font-size:.8rem;color:var(--sub);margin-top:18px}
+#log{display:flex;flex-direction:column;gap:8px;margin:10px 0}
+.msg{padding:9px 13px;border-radius:10px;max-width:90%;white-space:pre-wrap;font-size:.95rem}
+.msg.me{align-self:flex-end;background:var(--fg);color:var(--bg)}
+.msg.ai{align-self:flex-start;background:var(--bg);border:1px solid var(--line)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.chip{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:.85rem;font-weight:400;cursor:pointer}
+.ask{display:flex;gap:8px}
+.ask input{flex:1;min-width:0}
+.ask button{padding:9px 16px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -50,6 +59,17 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 </div>
 
 <div id="out"></div>
+
+<section id="chat" class="box" hidden>
+  <h2>내 사주에 대해 AI에게 질문하기</h2>
+  <div id="log" aria-live="polite"></div>
+  <div class="chips">
+    <button class="chip" data-q="올해 운세를 알려줘">올해 운세</button>
+    <button class="chip" data-q="내 연애 성향은 어떤 편이야?">연애 성향</button>
+    <button class="chip" data-q="어떤 직업이나 일하는 방식이 잘 맞을까?">직업</button>
+  </div>
+  <div class="ask"><input id="q" placeholder="궁금한 점을 입력하세요"><button id="send">보내기</button></div>
+</section>
 <p class="note">오락·참고용입니다. 절기를 매년 같은 날짜로 근사했고 진태양시·서머타임은 반영하지 않아, 경계일 부근은 실제 만세력과 다를 수 있습니다.</p>
 </main>
 
@@ -133,12 +153,57 @@ function render(p){
   document.getElementById("out").innerHTML=h+r.html;
 }
 
+// ---------- 5단계: AI 질문 (계산 결과를 AI에게 넘김) ----------
+let LAST=null, hist=[], sample=null, busy=false;
+const $=id=>document.getElementById(id);
+
+function context(){
+  const {p,cnt}=LAST;
+  const f=v=>v?STEM_KO[v[0]]+BR_KO[v[1]]+"("+STEM_HJ[v[0]]+BR_HJ[v[1]]+")":"모름";
+  return `너는 사주 명리 상담가다. 말투는 엄청나게 친근하고 팩폭을 잘 때리는 20대 게이 친구 캐릭터다. 욕은 아주 살짝만 섞되 기분 나쁘게는 말고, 엄청 MZ스럽게 반말로 대답하라.
+답변 형식: 질문에 맞는 서로 다른 주제 3개로 나누고, 각 주제는 이모지가 붙은 소제목 한 줄로 시작하라. 주제마다 5줄 이상 써라. 마크다운 기호(**, #, - 등)는 쓰지 마라.
+내용 규칙: 아래 계산된 사주 데이터만 근거로 하라. 데이터에 없는 글자나 대운·신살은 지어내지 마라. 단정적 예언과 건강·죽음·재물 확언은 피하고 경향과 조언 위주로 말하라.
+[사주] 생년월일: ${LAST.birth}, 성별: ${LAST.sex}
+연주 ${f(p.year)} / 월주 ${f(p.month)} / 일주 ${f(p.day)} / 시주 ${f(p.hour)}
+일간: ${STEM_KO[p.day[0]]}(${EL_NAME[STEM_EL[p.day[0]]]})
+오행 개수: ${EL_NAME.map((n,i)=>n+cnt[i]).join(", ")}
+오늘 날짜: ${new Date().toISOString().slice(0,10)}`;
+}
+function addMsg(cls,text){
+  const d=document.createElement("div");d.className="msg "+cls;d.textContent=text;
+  $("log").appendChild(d);d.scrollIntoView({block:"nearest"});return d;
+}
+async function ask(q){
+  q=q.trim(); if(busy||!q||!LAST)return;
+  if(!sample) sample=await claude.use("sample");
+  if(!sample){addMsg("ai","이 환경에서는 AI 질문을 쓸 수 없습니다.");return;}
+  busy=true; addMsg("me",q); hist.push({role:"user",content:q}); $("q").value="";
+  const box=addMsg("ai","생각 중…");
+  // AI는 기억이 없으므로 매번 사주 데이터 + 지금까지의 대화를 함께 보냄
+  const turns=hist.map((m,i)=>i===0?{role:m.role,content:context()+"\n\n질문: "+m.content}:m);
+  try{
+    const r=await sample(turns,{cache:false,onText:({text})=>{box.textContent=text;}});
+    box.textContent=r.text; hist.push({role:"assistant",content:r.text});
+  }catch(e){
+    box.textContent=e.code==="not_granted"?"AI 사용이 허용되지 않았습니다.":"답변을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.";
+    hist.pop();
+  }
+  busy=false;
+}
+$("send").onclick=()=>ask($("q").value);
+$("q").onkeydown=e=>{if(e.key==="Enter")ask($("q").value);};
+document.querySelectorAll(".chip").forEach(b=>b.onclick=()=>ask(b.dataset.q));
+
 document.getElementById("go").onclick=()=>{
   const [y,m,d]=document.getElementById("date").value.split("-").map(Number);
   if(!y){alert("생년월일을 입력하세요");return;}
   const t=document.getElementById("time").value;
   const unk=document.getElementById("unk").value==="1"||!t;
-  render(calc(y,m,d,unk?null:Number(t.split(":")[0])));
+  const p=calc(y,m,d,unk?null:Number(t.split(":")[0]));
+  render(p);
+  LAST={p,cnt:interpret(p).cnt,birth:`${y}-${m}-${d} ${unk?"(시각 모름)":t}`,sex:$("sex").value};
+  hist=[]; $("log").innerHTML="";
+  if(window.claude&&claude.use) $("chat").hidden=false;   // 발행 페이지에서만 표시
 };
 document.getElementById("go").click();
 </script>
